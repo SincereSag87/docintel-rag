@@ -38,6 +38,7 @@ class OllamaProvider(LLMProvider):
             response = self.client.chat.completions.create(
                 model=selected_model,
                 messages=payload,
+                temperature=0,
             )
         except NotFoundError as exc:
             raise LLMModelNotFoundError(

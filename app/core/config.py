@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     top_k: int = Field(default=5, alias="TOP_K", gt=0)
     chroma_path: str = Field(default="./data/chroma", alias="CHROMA_PATH")
     chroma_collection: str = Field(default="docintel", alias="CHROMA_COLLECTION", min_length=1)
+    max_rag_context_chars: int = Field(default=12000, alias="MAX_RAG_CONTEXT_CHARS", gt=0)
 
     @model_validator(mode="after")
     def validate_chunk_settings(self) -> "Settings":

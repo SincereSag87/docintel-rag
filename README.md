@@ -4,58 +4,240 @@ A local-first Retrieval-Augmented Generation platform for document ingestion, se
 
 ## Overview
 
-DocIntel RAG is an original AI engineering portfolio and client-demo project. It is designed to help teams query trusted document collections such as policy manuals, support documentation, technical references, contracts, and research archives.
+DocIntel RAG is an original AI engineering portfolio and client-demo project for querying trusted document collections such as employee policies, support documentation, product manuals, compliance references, contracts, and internal technical documentation.
 
-Phase 3 adds document chunking, batch embedding generation, persistent ChromaDB vector storage, idempotent indexing, and semantic search. Grounded LLM question-answering, APIs, and UI work are intentionally reserved for later phases.
+Phase 4 adds the first complete grounded RAG workflow. A user question is embedded, matched against indexed ChromaDB chunks, formatted into source-numbered context, sent to a local Ollama model, parsed as structured JSON, and mapped back to trusted retrieval records for citations.
+
+Semantic retrieval decides which passages are relevant. The LLM only receives those passages and must answer from them. Citations are mapped back to retrieval results, not generated freely by the model.
 
 ## Why RAG
 
 Large language models are powerful, but they do not automatically know private or changing business documents. Retrieval-Augmented Generation connects a model to relevant source passages at answer time, which improves grounding, allows citations, and makes document intelligence systems easier to inspect and evaluate.
 
-## Why Chunking Matters
-
-Long documents are too large and noisy to retrieve as a single unit. Chunking splits documents into smaller passages so search can return the specific policy, procedure, or paragraph that matters for a user's question.
-
-DocIntel's Phase 3 chunker is character-oriented. `CHUNK_SIZE` is the target maximum character count for a chunk, and `CHUNK_OVERLAP` is the number of trailing characters from the previous chunk copied into the next chunk for continuity.
-
-## Why Embeddings Matter
-
-Embeddings convert text into numeric vectors that represent meaning. This allows DocIntel to find passages about PTO, expense approval, or remote work even when the query uses different words from the source document.
-
-## Vector Search vs Keyword Search
-
-Keyword search matches exact terms. Vector search compares embedding distance, so it can retrieve semantically related passages. ChromaDB returns distances, where lower values are closer matches. DocIntel labels these values as distance, not similarity.
-
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A[PDF / DOCX / TXT] --> B[DocumentIngestor]
-    B --> C[Document]
-    C --> D[RecursiveTextChunker]
-    D --> E[DocumentChunk array]
-    E --> F[EmbeddingProvider]
-    F --> G[EmbeddedChunk array]
-    G --> H[ChromaVectorStore]
-    H --> I[Persistent Collection]
-    I --> J[Retriever]
-    J --> K[Semantic Search Results]
-    K --> L[Grounded Answer + Citations<br/>Phase 4]
+    A[Question] --> B[Query Embedding]
+    B --> C[ChromaDB]
+    C --> D[Top-K Chunks]
+    D --> E[Context Builder]
+    E --> F[Ollama]
+    F --> G[Structured JSON]
+    G --> H[Pydantic Validation]
+    H --> I[Trusted Citation Mapping]
+    I --> J[Grounded Answer]
 ```
 
-## Current Phase 3 Capabilities
+## Current Phase 4 Capabilities
 
 - Local document ingestion for PDF, DOCX, and TXT files.
 - Text normalization with paragraph boundaries preserved.
-- Deterministic SHA-256 document IDs based on file contents.
-- Recursive text chunking with configurable size and overlap.
-- Deterministic chunk IDs based on document ID, chunk index, chunk settings, and text hash.
-- Batch embedding pipeline using the existing sentence-transformers provider.
+- Recursive character-oriented chunking with configurable size and overlap.
+- Batch embedding generation using sentence-transformers.
 - Persistent ChromaDB vector storage under `./data/chroma` by default.
-- Idempotent indexing using deterministic IDs and Chroma upsert.
-- Semantic search over indexed chunks.
-- CLI workflows for index, search, stats, delete, and guarded clear.
-- Unit tests for ingestion, chunking, embedding pipeline, Chroma storage, retrieval, and CLI parsing.
+- Idempotent indexing with deterministic document and chunk IDs.
+- Semantic vector search over indexed chunks.
+- Grounded question answering with local Ollama models.
+- Structured JSON model responses validated with Pydantic.
+- Source-number citation mapping from retrieval results.
+- Explicit insufficient-information behavior.
+- CLI workflows for indexing, search, asking, stats, delete, clear, JSON output, and retrieval debug.
+
+## Grounded Generation Flow
+
+```text
+question
+-> Retriever
+-> top-k RetrievalResult values
+-> ContextBuilder source blocks
+-> grounded prompt
+-> LLMProvider
+-> JSON parser
+-> Citation mapping
+-> GroundedAnswer
+```
+
+The context builder formats each retrieved chunk as a stable source block:
+
+```text
+[SOURCE 1]
+Filename: employee_handbook.txt
+Chunk: 0
+Distance: 0.21
+Content:
+Employees receive 15 days of paid time off each calendar year.
+```
+
+The model is asked to return only:
+
+```json
+{
+  "answer": "string",
+  "answered": true,
+  "source_numbers": [1]
+}
+```
+
+The application maps `source_numbers` back to trusted `RetrievalResult` objects. The model is never trusted to invent filenames, document IDs, chunk IDs, page numbers, or citation metadata.
+
+## Insufficient Information
+
+When retrieval returns no results, DocIntel does not call the LLM. It returns:
+
+```text
+The indexed documents do not contain enough information to answer this question.
+```
+
+The prompt also instructs the model to use that exact answer when retrieved context does not contain enough evidence. In that case `answered=false` and citations are empty.
+
+## Context Limits
+
+`MAX_RAG_CONTEXT_CHARS` defaults to `12000`. If retrieved context exceeds the limit, DocIntel keeps highest-ranked chunks first and includes complete chunks where possible. If a single chunk exceeds the limit, it is truncated deterministically.
+
+No token-counting dependency is used yet.
+
+## Retrieval And Distance
+
+Vector search compares embeddings, not exact keywords. ChromaDB returns numeric distances, where lower is closer. DocIntel labels these values as `distance` and does not treat them as similarity scores.
+
+No arbitrary retrieval-distance cutoff is applied in Phase 4. The system relies on top-k retrieval plus the model's grounded evidence decision.
+
+## CLI Workflows
+
+Index a document:
+
+```bash
+uv run python -m app.main --index path/to/handbook.txt
+```
+
+Ask a grounded question:
+
+```bash
+uv run python -m app.main --ask "How many PTO days do employees receive?"
+```
+
+Use a specific local model:
+
+```bash
+uv run python -m app.main --ask "How many PTO days do employees receive?" --model llama3.2
+uv run python -m app.main --ask "How many PTO days do employees receive?" --model gemma3
+```
+
+Control retrieval count:
+
+```bash
+uv run python -m app.main --ask "What expenses require manager approval?" --top-k 3
+```
+
+Filter to one or more documents:
+
+```bash
+uv run python -m app.main --ask "What is the PTO policy?" --document-id sha256:<id>
+```
+
+Show retrieval evidence:
+
+```bash
+uv run python -m app.main --ask "How many PTO days do employees receive?" --show-retrieval
+```
+
+Return JSON:
+
+```bash
+uv run python -m app.main --ask "What expenses require manager approval?" --output json
+```
+
+Inspect retrieval without generation:
+
+```bash
+uv run python -m app.main --search "expense approval" --top-k 3
+```
+
+Index stats:
+
+```bash
+uv run python -m app.main --index-stats
+```
+
+Clear the local index:
+
+```bash
+uv run python -m app.main --clear-index --yes
+```
+
+`--clear-index` requires `--yes`.
+
+## Configuration
+
+Default settings:
+
+```text
+OLLAMA_BASE_URL=http://localhost:11434/v1
+DEFAULT_MODEL=llama3.2
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+CHUNK_SIZE=800
+CHUNK_OVERLAP=120
+TOP_K=5
+CHROMA_PATH=./data/chroma
+CHROMA_COLLECTION=docintel
+MAX_RAG_CONTEXT_CHARS=12000
+```
+
+`CHUNK_OVERLAP` must be smaller than `CHUNK_SIZE`.
+
+## Client Value
+
+Phase 4 is useful for prototypes and client demos around:
+
+- Employee policy assistants
+- Compliance documentation
+- Product manuals
+- Support knowledge bases
+- Internal technical documentation
+
+DocIntel provides grounded answers with citations, but it does not claim legal, HR, compliance, or audit guarantees.
+
+## Demo Collection Direction
+
+The future Employee Handbook Demo can include:
+
+- PTO policy
+- Remote work policy
+- Expense policy
+- Security policy
+
+Example questions:
+
+- How many PTO days do employees receive?
+- What expenses require manager approval?
+- How many remote days are allowed?
+- What does the handbook say about something not present?
+
+## Security And Privacy
+
+DocIntel is local-first. Private documents can be parsed, embedded, indexed, and queried locally without being sent to a cloud document API.
+
+The repository ignores:
+
+- `.env`
+- `.venv/`
+- `data/`
+- `uploads/`
+- `runtime/`
+- `*.log`
+
+Do not commit private client documents, Chroma databases, embeddings, model downloads, logs, or generated runtime data. Avoid logging full private documents.
+
+## Current Limitations
+
+- No FastAPI backend yet.
+- No Gradio client demo yet.
+- No reranker.
+- No agents.
+- No OCR for scanned PDFs.
+- No retrieval evaluation suite yet.
+- Chunking is character-oriented, not tokenizer-based.
 
 ## Technology Stack
 
@@ -73,184 +255,14 @@ flowchart TD
 - pytest
 - Ruff
 
-LangChain, FAISS, Pinecone, Qdrant, FastAPI, Gradio, OCR frameworks, and cloud document APIs are intentionally not included in Phase 3.
-
-## Configuration
-
-Default settings:
-
-```text
-OLLAMA_BASE_URL=http://localhost:11434/v1
-DEFAULT_MODEL=llama3.2
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-CHUNK_SIZE=800
-CHUNK_OVERLAP=120
-TOP_K=5
-CHROMA_PATH=./data/chroma
-CHROMA_COLLECTION=docintel
-```
-
-`CHUNK_OVERLAP` must be smaller than `CHUNK_SIZE`.
-
-## Document Ingestion
-
-DocIntel currently supports local, text-only ingestion for:
-
-- PDF files with extractable text
-- DOCX files with paragraphs, headings, and simple tables
-- TXT files, primarily UTF-8 with safe fallback handling
-
-Each ingested file is normalized into the shared `Document` domain model. The ingestion layer does not persist source files or send private documents to a cloud API.
-
-Scanned or image-only PDFs are not supported yet. If little or no readable text can be extracted, DocIntel raises a clear scanned-document extraction error instead of attempting OCR.
-
-## Chunking
-
-`RecursiveTextChunker` tries boundaries in this order:
-
-1. Paragraph breaks
-2. Line breaks
-3. Sentence-ish punctuation
-4. Spaces
-5. Hard character split
-
-Chunk metadata includes document ID, filename, source type, chunk index, scalar document metadata, and inferred PDF page where `[Page N]` markers are present.
-
-## Embedding And Indexing
-
-`EmbeddingPipeline` embeds chunks in batches with `EmbeddingProvider.embed_texts()`. It validates vector count and dimensional consistency before storing `EmbeddedChunk` values.
-
-`IndexService` orchestrates:
-
-```text
-path -> DocumentIngestor -> Document -> Chunker -> EmbeddingProvider -> ChromaVectorStore
-```
-
-Indexing the same document twice is idempotent because document and chunk IDs are deterministic and ChromaDB receives upserts.
-
-## ChromaDB Persistence
-
-The default persistent collection is:
-
-```text
-Path: ./data/chroma
-Collection: docintel
-```
-
-The `data/` directory is ignored by Git. Do not commit vector databases, embeddings, private documents, logs, or runtime files.
-
-## CLI Workflows
-
-Health check:
-
-```bash
-uv run python -m app.main
-```
-
-Ingest and summarize a document without indexing:
-
-```bash
-uv run python -m app.main --ingest path/to/file.pdf
-```
-
-Index a document:
-
-```bash
-uv run python -m app.main --index path/to/handbook.txt
-```
-
-Search the local vector index:
-
-```bash
-uv run python -m app.main --search "How many PTO days do employees receive?"
-```
-
-Limit search results:
-
-```bash
-uv run python -m app.main --search "expense approval" --top-k 3
-```
-
-Show index stats:
-
-```bash
-uv run python -m app.main --index-stats
-```
-
-Delete one document:
-
-```bash
-uv run python -m app.main --delete-document sha256:<document-id>
-```
-
-Clear the local index:
-
-```bash
-uv run python -m app.main --clear-index --yes
-```
-
-`--clear-index` requires `--yes`.
-
-LLM smoke test:
-
-```bash
-uv run python -m app.main --llm-test
-```
-
-Embedding smoke test:
-
-```bash
-uv run python -m app.main --embedding-test
-```
-
-## Client Demo Direction
-
-The future Employee Handbook Demo can include:
-
-- PTO policy
-- Remote work policy
-- Expense policy
-- Security policy
-
-Example Phase 4 questions:
-
-- How many PTO days do employees receive?
-- What expenses require manager approval?
-- How many remote days are allowed?
-- What does the handbook say about something not present?
-
-Phase 3 returns retrieved chunks only. It does not generate grounded answers yet.
-
-## Security And Privacy
-
-DocIntel is local-first. Private documents can be parsed, embedded, and indexed locally without being sent to a cloud document API.
-
-The repository ignores:
-
-- `.env`
-- `.venv/`
-- `data/`
-- `uploads/`
-- `runtime/`
-- `*.log`
-
-Do not commit private client documents, Chroma databases, embedding caches, model downloads, logs, or generated runtime data.
-
-## Current Limitations
-
-- No grounded LLM answer synthesis yet.
-- No source citation answer formatting yet.
-- No reranking.
-- No OCR for scanned PDFs.
-- No API or web UI.
-- Chunking is character-oriented, not tokenizer-based.
+LangChain, FAISS, Pinecone, Qdrant, FastAPI, Gradio, OCR frameworks, and cloud document APIs are intentionally not included in Phase 4.
 
 ## Planned Roadmap
 
-1. Core providers & domain foundation complete
-2. Document ingestion complete
-3. Chunking, embeddings & ChromaDB complete
-4. Retrieval & grounded Q&A
+1. Core providers & domain foundation ✅
+2. Document ingestion ✅
+3. Chunking, embeddings & ChromaDB ✅
+4. Retrieval & grounded Q&A ✅
 5. RAG evaluation
 6. FastAPI backend
 7. Gradio client demo

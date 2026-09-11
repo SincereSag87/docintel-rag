@@ -15,6 +15,7 @@ def test_settings_defaults() -> None:
     assert settings.top_k == 5
     assert settings.chroma_path == "./data/chroma"
     assert settings.chroma_collection == "docintel"
+    assert settings.max_rag_context_chars == 12000
 
 
 def test_settings_environment_overrides(monkeypatch) -> None:
@@ -26,6 +27,7 @@ def test_settings_environment_overrides(monkeypatch) -> None:
     monkeypatch.setenv("TOP_K", "8")
     monkeypatch.setenv("CHROMA_PATH", "./runtime/test-chroma")
     monkeypatch.setenv("CHROMA_COLLECTION", "test-docintel")
+    monkeypatch.setenv("MAX_RAG_CONTEXT_CHARS", "6000")
 
     settings = Settings()
 
@@ -37,6 +39,7 @@ def test_settings_environment_overrides(monkeypatch) -> None:
     assert settings.top_k == 8
     assert settings.chroma_path == "./runtime/test-chroma"
     assert settings.chroma_collection == "test-docintel"
+    assert settings.max_rag_context_chars == 6000
 
 
 def test_settings_rejects_overlap_greater_than_chunk_size() -> None:

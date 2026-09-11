@@ -45,3 +45,4 @@ class Citation(BaseModel):
     chunk_id: str
     chunk_index: int = Field(ge=0)
     excerpt: str = Field(min_length=1)
+    page: int | None = Field(default=None, ge=1)

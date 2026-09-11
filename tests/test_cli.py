@@ -20,6 +20,31 @@ def test_cli_parses_index_stats() -> None:
     assert args.index_stats is True
 
 
+def test_cli_parses_ask_model_top_k_json_and_debug() -> None:
+    args = build_parser().parse_args(
+        [
+            "--ask",
+            "How many PTO days?",
+            "--model",
+            "gemma3",
+            "--top-k",
+            "3",
+            "--output",
+            "json",
+            "--show-retrieval",
+            "--document-id",
+            "doc-1",
+        ]
+    )
+
+    assert args.ask == "How many PTO days?"
+    assert args.model == "gemma3"
+    assert args.top_k == 3
+    assert args.output == "json"
+    assert args.show_retrieval is True
+    assert args.document_id == ["doc-1"]
+
+
 def test_cli_requires_confirmation_for_clear_index(capsys) -> None:
     exit_code = run_clear_index(confirmed=False)
 

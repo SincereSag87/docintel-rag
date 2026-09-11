@@ -1,4 +1,5 @@
 import argparse
+import json
 
 from app.core.config import get_settings
 from app.embeddings.base import EmbeddingError
@@ -10,6 +11,7 @@ from app.llm.ollama_provider import OllamaProvider
 from app.services.document_service import DocumentService
 from app.services.health_service import HealthService
 from app.services.index_service import IndexService
+from app.services.rag_service import RAGService
 
 RAG_EXPLANATION_PROMPT = "Explain retrieval-augmented generation in three sentences."
 
@@ -39,6 +41,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--delete-document", help="Delete one document from the vector index.")
     parser.add_argument("--clear-index", action="store_true", help="Clear the local vector index.")
     parser.add_argument("--yes", action="store_true", help="Confirm destructive commands.")
+    parser.add_argument("--ask", help="Ask a grounded question using retrieved indexed context.")
+    parser.add_argument(
+        "--document-id",
+        action="append",
+        help="Restrict --ask or --search to a document ID. Can be passed more than once.",
+    )
+    parser.add_argument(
+        "--output",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for --ask.",
+    )
+    parser.add_argument(
+        "--show-retrieval",
+        action="store_true",
+        help="Show retrieved chunks and distances for --ask debugging.",
+    )
     return parser
 
 
@@ -135,10 +154,14 @@ def run_index(path: str) -> int:
     return 0
 
 
-def run_search(query: str, top_k: int | None = None) -> int:
+def run_search(
+    query: str,
+    top_k: int | None = None,
+    document_ids: list[str] | None = None,
+) -> int:
     service = IndexService()
     try:
-        results = service.search(query, top_k=top_k)
+        results = service.search(query, top_k=top_k, document_ids=document_ids)
     except Exception as exc:
         print(f"Search failed: {exc}")
         return 1
@@ -160,6 +183,69 @@ def run_search(query: str, top_k: int | None = None) -> int:
         print(f"Distance: {result.distance:.6f}")
         print("Excerpt:")
         print(excerpt)
+    return 0
+
+
+def run_ask(
+    question: str,
+    model: str | None = None,
+    top_k: int | None = None,
+    document_ids: list[str] | None = None,
+    output: str = "text",
+    show_retrieval: bool = False,
+) -> int:
+    service = RAGService()
+    try:
+        answer = service.ask(
+            question=question,
+            model=model,
+            top_k=top_k,
+            document_ids=document_ids,
+        )
+    except Exception as exc:
+        print(f"RAG question answering failed: {exc}")
+        return 1
+
+    if output == "json":
+        print(json.dumps(answer.model_dump(), indent=2))
+        return 0
+
+    print("Question:")
+    print(answer.question)
+    print("")
+    print("Answer:")
+    print(answer.answer)
+    print("")
+    print("Model:")
+    print(answer.model)
+    print("")
+    print("Sources:")
+    if not answer.citations:
+        print("None")
+    for index, citation in enumerate(answer.citations, start=1):
+        print(f"[{index}] {citation.filename}")
+        print(f"Chunk: {citation.chunk_index}")
+        if citation.page is not None:
+            print(f"Page: {citation.page}")
+        print("Excerpt:")
+        print(citation.excerpt)
+
+    if show_retrieval:
+        print("")
+        print("Retrieval Evidence:")
+        if not answer.retrieval_results:
+            print("None")
+        for index, result in enumerate(answer.retrieval_results, start=1):
+            excerpt = result.text[:500].strip()
+            if len(result.text) > 500:
+                excerpt = f"{excerpt}..."
+            print("")
+            print(f"Rank {index}")
+            print(f"Filename: {result.filename}")
+            print(f"Chunk: {result.chunk_index}")
+            print(f"Distance: {result.distance:.6f}")
+            print("Excerpt:")
+            print(excerpt)
     return 0
 
 
@@ -204,7 +290,16 @@ def main() -> int:
     if args.index:
         return run_index(args.index)
     if args.search:
-        return run_search(args.search, top_k=args.top_k)
+        return run_search(args.search, top_k=args.top_k, document_ids=args.document_id)
+    if args.ask:
+        return run_ask(
+            args.ask,
+            model=args.model,
+            top_k=args.top_k,
+            document_ids=args.document_id,
+            output=args.output,
+            show_retrieval=args.show_retrieval,
+        )
     if args.index_stats:
         return run_index_stats()
     if args.delete_document:
