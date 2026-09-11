@@ -6,7 +6,7 @@ A local-first Retrieval-Augmented Generation platform for document ingestion, se
 
 DocIntel RAG is an original AI engineering portfolio and client-demo project. It is designed to help teams query trusted document collections such as policy manuals, support documentation, technical references, contracts, and research archives.
 
-Phase 1 establishes the project foundation without hiding the architecture behind a RAG framework. Retrieval, chunking, vector storage, APIs, and UI work are intentionally reserved for later phases.
+Phase 2 adds local document ingestion for extractable-text PDF, DOCX, and TXT files. Retrieval, chunking, vector storage, APIs, and UI work are intentionally reserved for later phases.
 
 ## Why RAG
 
@@ -26,16 +26,19 @@ Large language models are powerful, but they do not automatically know private o
 
 ```mermaid
 flowchart TD
-    A[Documents] --> B[Document Processing<br/>future]
-    B --> C[Chunking<br/>future]
-    C --> D[EmbeddingProvider]
-    D --> E[VectorStore]
-    E --> F[Retriever<br/>future]
-    F --> G[LLMProvider]
-    G --> H[Grounded Answer + Citations]
+    A[PDF / DOCX / TXT] --> B[DocumentIngestor]
+    B --> C[Loader]
+    C --> D[Normalizer]
+    D --> E[Document]
+    E --> F[Chunking<br/>Phase 3]
+    F --> G[EmbeddingProvider]
+    G --> H[VectorStore]
+    H --> I[Retriever<br/>future]
+    I --> J[LLMProvider]
+    J --> K[Grounded Answer + Citations]
 ```
 
-## Current Phase 1 Capabilities
+## Current Phase 2 Capabilities
 
 - Python project structure for a RAG platform.
 - Pydantic settings loaded from environment variables and `.env`.
@@ -45,6 +48,10 @@ flowchart TD
 - Vector store interface prepared for a future ChromaDB implementation.
 - Health service for configuration and Ollama reachability checks.
 - CLI smoke tests for local generation and embeddings.
+- Local document ingestion for PDF, DOCX, and TXT files.
+- Text normalization with paragraph boundaries preserved.
+- Deterministic SHA-256 document IDs based on file contents.
+- CLI document inspection and ingestion summaries.
 - Unit tests with mocked external dependencies.
 - Ruff lint configuration.
 
@@ -54,6 +61,8 @@ flowchart TD
 - uv
 - Ollama
 - OpenAI-compatible Ollama endpoint
+- PyMuPDF
+- python-docx
 - sentence-transformers
 - Pydantic
 - pydantic-settings
@@ -61,7 +70,7 @@ flowchart TD
 - pytest
 - Ruff
 
-LangChain, ChromaDB, FastAPI, Gradio, and document parsers are intentionally not included in Phase 1.
+LangChain, ChromaDB, FastAPI, Gradio, OCR frameworks, and cloud document APIs are intentionally not included in Phase 2.
 
 ## Prerequisites
 
@@ -106,6 +115,54 @@ cp .env.example .env
 
 No OpenAI API key is required.
 
+## Document Ingestion
+
+DocIntel currently supports local, text-only ingestion for:
+
+- PDF files with extractable text
+- DOCX files with paragraphs, headings, and simple tables
+- TXT files, primarily UTF-8 with safe fallback handling
+
+Each ingested file is normalized into the shared `Document` domain model. The ingestion layer does not persist files or send private documents to a cloud API.
+
+```mermaid
+flowchart TD
+    A[PDF / DOCX / TXT] --> B[DocumentIngestor]
+    B --> C[File Type Detection]
+    C --> D[PDFLoader / DocxLoader / TextLoader]
+    D --> E[Normalizer]
+    E --> F[Document]
+    F --> G[Chunking<br/>Phase 3]
+```
+
+### PDF Behavior
+
+PDF extraction uses PyMuPDF page by page. The resulting text keeps page markers such as `[Page 1]` where text is available. Metadata may include page count, author, title, and subject.
+
+Scanned or image-only PDFs are not supported yet. If little or no readable text can be extracted, DocIntel raises a clear scanned-document extraction error instead of attempting OCR.
+
+### DOCX Behavior
+
+DOCX extraction uses python-docx. It reads paragraphs and headings as document text and converts simple table rows into readable pipe-separated rows. Complex page layout reconstruction is out of scope for this phase.
+
+### TXT Behavior
+
+TXT ingestion uses standard Python file handling. UTF-8 and UTF-8 with BOM are preferred, with a conservative Windows text fallback for common local files. Empty files are rejected cleanly.
+
+### Text Normalization
+
+The shared normalizer removes null characters, normalizes line endings, trims lines, collapses repeated spaces, and reduces excessive blank lines. It preserves paragraph boundaries, headings, and meaningful newlines instead of flattening the document into one line.
+
+### Deterministic Document IDs
+
+Document IDs are generated from the SHA-256 hash of file contents:
+
+```text
+sha256:<digest>
+```
+
+The same file contents produce the same ID even if the filename changes. Different contents produce different IDs.
+
 ## Running Health Checks
 
 ```bash
@@ -143,6 +200,22 @@ uv run python -m app.main --embedding-test
 
 This prints the configured embedding model and vector dimension, not the full vector.
 
+## Document Ingestion CLI
+
+Ingest and summarize a local document:
+
+```bash
+uv run python -m app.main --ingest path/to/file.pdf
+```
+
+Inspect a document without persistence:
+
+```bash
+uv run python -m app.main --inspect path/to/file.docx
+```
+
+The CLI prints filename, document ID, source type, character count, word count, PDF pages when available, metadata, and a short preview. It does not print the full document.
+
 ## Client Demo Direction
 
 The finished system is intended to support demo collections such as:
@@ -152,12 +225,36 @@ The finished system is intended to support demo collections such as:
 - Product Documentation
 - Customer Support Knowledge Base
 
-These demo collections are not built in Phase 1.
+Example Employee Handbook collection:
+
+- PTO policy
+- Remote work policy
+- Expense policy
+- Security policy
+
+Later users will ask questions such as:
+
+- How many PTO days do employees receive?
+- What expenses require manager approval?
+
+These demo collections and RAG answers are not built in Phase 2.
+
+## Security And Privacy
+
+DocIntel is local-first. Phase 2 ingestion is designed so private documents can be parsed locally without being sent to a cloud document API.
+
+The repository ignores local document and runtime directories:
+
+- `uploads/`
+- `data/`
+- `runtime/`
+
+Do not commit private client documents, `.env` files, model caches, logs, or generated runtime data.
 
 ## Planned Roadmap
 
-1. Core providers & domain foundation ✅
-2. Document ingestion
+1. Core providers & domain foundation complete
+2. Document ingestion complete
 3. Chunking, embeddings & ChromaDB
 4. Retrieval & grounded Q&A
 5. RAG evaluation

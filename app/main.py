@@ -3,9 +3,11 @@ import argparse
 from app.core.config import get_settings
 from app.embeddings.base import EmbeddingError
 from app.embeddings.sentence_transformer_provider import SentenceTransformerEmbeddingProvider
+from app.ingestion.base import DocumentIngestionError
 from app.llm.base import LLMError
 from app.llm.models import ChatMessage
 from app.llm.ollama_provider import OllamaProvider
+from app.services.document_service import DocumentService
 from app.services.health_service import HealthService
 
 RAG_EXPLANATION_PROMPT = "Explain retrieval-augmented generation in three sentences."
@@ -20,6 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run an embedding smoke test.",
     )
     parser.add_argument("--model", help="Override the Ollama generation model for --llm-test.")
+    parser.add_argument("--ingest", help="Ingest and summarize a local PDF, DOCX, or TXT file.")
+    parser.add_argument(
+        "--inspect",
+        help="Inspect a local PDF, DOCX, or TXT file without persistence.",
+    )
     return parser
 
 
@@ -74,6 +81,30 @@ def run_embedding_test() -> int:
     return 0
 
 
+def run_document_ingestion(path: str, title: str = "DocIntel RAG Document Ingestion") -> int:
+    service = DocumentService()
+    try:
+        summary = service.inspect_document(path)
+    except DocumentIngestionError as exc:
+        print(f"Document ingestion failed: {exc}")
+        return 1
+
+    print(title)
+    print(f"Filename: {summary.filename}")
+    print(f"Document ID: {summary.document_id}")
+    print(f"Source type: {summary.source_type}")
+    print(f"Characters: {summary.characters}")
+    print(f"Words: {summary.words}")
+    if "page_count" in summary.metadata:
+        print(f"Pages: {summary.metadata['page_count']}")
+    print("Metadata:")
+    for key, value in sorted(summary.metadata.items()):
+        print(f"  {key}: {value}")
+    print("Preview:")
+    print(summary.preview)
+    return 0
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -81,6 +112,10 @@ def main() -> int:
         return run_llm_test(args.model)
     if args.embedding_test:
         return run_embedding_test()
+    if args.ingest:
+        return run_document_ingestion(args.ingest)
+    if args.inspect:
+        return run_document_ingestion(args.inspect, title="DocIntel RAG Document Inspection")
     return print_health()
 
 
