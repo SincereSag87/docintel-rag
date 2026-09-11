@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=800, alias="CHUNK_SIZE", gt=0)
     chunk_overlap: int = Field(default=120, alias="CHUNK_OVERLAP", ge=0)
     top_k: int = Field(default=5, alias="TOP_K", gt=0)
+    chroma_path: str = Field(default="./data/chroma", alias="CHROMA_PATH")
+    chroma_collection: str = Field(default="docintel", alias="CHROMA_COLLECTION", min_length=1)
+
+    @model_validator(mode="after")
+    def validate_chunk_settings(self) -> "Settings":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("CHUNK_OVERLAP must be less than CHUNK_SIZE.")
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

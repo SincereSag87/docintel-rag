@@ -9,6 +9,7 @@ from app.llm.models import ChatMessage
 from app.llm.ollama_provider import OllamaProvider
 from app.services.document_service import DocumentService
 from app.services.health_service import HealthService
+from app.services.index_service import IndexService
 
 RAG_EXPLANATION_PROMPT = "Explain retrieval-augmented generation in three sentences."
 
@@ -27,6 +28,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--inspect",
         help="Inspect a local PDF, DOCX, or TXT file without persistence.",
     )
+    parser.add_argument("--index", help="Index a local PDF, DOCX, or TXT file into ChromaDB.")
+    parser.add_argument("--search", help="Run semantic vector search against the local index.")
+    parser.add_argument("--top-k", type=int, help="Number of search results to return.")
+    parser.add_argument(
+        "--index-stats",
+        action="store_true",
+        help="Print local vector index stats.",
+    )
+    parser.add_argument("--delete-document", help="Delete one document from the vector index.")
+    parser.add_argument("--clear-index", action="store_true", help="Clear the local vector index.")
+    parser.add_argument("--yes", action="store_true", help="Confirm destructive commands.")
     return parser
 
 
@@ -105,6 +117,79 @@ def run_document_ingestion(path: str, title: str = "DocIntel RAG Document Ingest
     return 0
 
 
+def run_index(path: str) -> int:
+    service = IndexService()
+    try:
+        result = service.index_document(path)
+    except Exception as exc:
+        print(f"Indexing failed: {exc}")
+        return 1
+
+    print("DocIntel RAG Indexing")
+    print(f"Filename: {result.filename}")
+    print(f"Document ID: {result.document_id}")
+    print(f"Chunks indexed: {result.chunk_count}")
+    print(f"Embedding model: {result.embedding_model}")
+    print(f"Collection: {result.collection}")
+    print(f"Elapsed seconds: {result.elapsed_seconds:.2f}")
+    return 0
+
+
+def run_search(query: str, top_k: int | None = None) -> int:
+    service = IndexService()
+    try:
+        results = service.search(query, top_k=top_k)
+    except Exception as exc:
+        print(f"Search failed: {exc}")
+        return 1
+
+    print("DocIntel RAG Semantic Search")
+    print(f"Query: {query}")
+    if not results:
+        print("No results found.")
+        return 0
+
+    for rank, result in enumerate(results, start=1):
+        excerpt = result.text[:500].strip()
+        if len(result.text) > 500:
+            excerpt = f"{excerpt}..."
+        print("")
+        print(f"Rank {rank}")
+        print(f"Filename: {result.filename}")
+        print(f"Chunk: {result.chunk_index}")
+        print(f"Distance: {result.distance:.6f}")
+        print("Excerpt:")
+        print(excerpt)
+    return 0
+
+
+def run_index_stats() -> int:
+    stats = IndexService().get_index_stats()
+    print("DocIntel RAG Index Stats")
+    print(f"Collection: {stats.collection}")
+    print(f"Count: {stats.count}")
+    print(f"Path: {stats.path}")
+    return 0
+
+
+def run_delete_document(document_id: str) -> int:
+    IndexService().delete_document(document_id)
+    print("DocIntel RAG Delete Document")
+    print(f"Deleted document: {document_id}")
+    return 0
+
+
+def run_clear_index(confirmed: bool) -> int:
+    if not confirmed:
+        print("Clear index requires explicit confirmation: --clear-index --yes")
+        return 1
+
+    IndexService().clear_index()
+    print("DocIntel RAG Clear Index")
+    print("Index cleared.")
+    return 0
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -116,6 +201,16 @@ def main() -> int:
         return run_document_ingestion(args.ingest)
     if args.inspect:
         return run_document_ingestion(args.inspect, title="DocIntel RAG Document Inspection")
+    if args.index:
+        return run_index(args.index)
+    if args.search:
+        return run_search(args.search, top_k=args.top_k)
+    if args.index_stats:
+        return run_index_stats()
+    if args.delete_document:
+        return run_delete_document(args.delete_document)
+    if args.clear_index:
+        return run_clear_index(args.yes)
     return print_health()
 
 

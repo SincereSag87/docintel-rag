@@ -3,11 +3,12 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
 from app.documents.models import EmbeddedChunk
+from app.storage.models import VectorStoreStats
 
 
 class VectorSearchResult(BaseModel):
     chunk: EmbeddedChunk
-    score: float
+    distance: float
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
@@ -27,3 +28,7 @@ class VectorStore(ABC):
     @abstractmethod
     def clear(self) -> None:
         """Clear all indexed vectors."""
+
+    def stats(self) -> VectorStoreStats:
+        """Return vector store statistics when supported."""
+        raise NotImplementedError
