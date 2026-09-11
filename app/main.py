@@ -4,11 +4,13 @@ import json
 from app.core.config import get_settings
 from app.embeddings.base import EmbeddingError
 from app.embeddings.sentence_transformer_provider import SentenceTransformerEmbeddingProvider
+from app.evaluation.formatter import evaluation_report_to_json, format_evaluation_report
 from app.ingestion.base import DocumentIngestionError
 from app.llm.base import LLMError
 from app.llm.models import ChatMessage
 from app.llm.ollama_provider import OllamaProvider
 from app.services.document_service import DocumentService
+from app.services.evaluation_service import EvaluationService
 from app.services.health_service import HealthService
 from app.services.index_service import IndexService
 from app.services.rag_service import RAGService
@@ -58,6 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show retrieved chunks and distances for --ask debugging.",
     )
+    parser.add_argument("--evaluate", help="Run a RAG benchmark dataset JSON file.")
+    parser.add_argument(
+        "--evaluate-retrieval",
+        action="store_true",
+        help="Evaluate retrieval metrics only without calling Ollama.",
+    )
+    parser.add_argument("--save", help="Save --evaluate output JSON to a path.")
     return parser
 
 
@@ -276,6 +285,36 @@ def run_clear_index(confirmed: bool) -> int:
     return 0
 
 
+def run_evaluation(
+    dataset_path: str,
+    model: str | None,
+    output: str,
+    retrieval_only: bool,
+    save_path: str | None,
+) -> int:
+    selected_model = model or get_settings().default_model
+    try:
+        report = EvaluationService().run(
+            dataset_path=dataset_path,
+            model=selected_model,
+            retrieval_only=retrieval_only,
+        )
+    except Exception as exc:
+        print(f"Evaluation failed: {exc}")
+        return 1
+
+    json_output = evaluation_report_to_json(report)
+    if save_path:
+        from pathlib import Path
+
+        path = Path(save_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json_output, encoding="utf-8")
+
+    print(json_output if output == "json" else format_evaluation_report(report))
+    return 0
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -306,6 +345,14 @@ def main() -> int:
         return run_delete_document(args.delete_document)
     if args.clear_index:
         return run_clear_index(args.yes)
+    if args.evaluate:
+        return run_evaluation(
+            dataset_path=args.evaluate,
+            model=args.model,
+            output=args.output,
+            retrieval_only=args.evaluate_retrieval,
+            save_path=args.save,
+        )
     return print_health()
 
 

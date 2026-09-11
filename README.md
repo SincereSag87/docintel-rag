@@ -6,15 +6,30 @@ A local-first Retrieval-Augmented Generation platform for document ingestion, se
 
 DocIntel RAG is an original AI engineering portfolio and client-demo project for querying trusted document collections such as employee policies, support documentation, product manuals, compliance references, contracts, and internal technical documentation.
 
-Phase 4 adds the first complete grounded RAG workflow. A user question is embedded, matched against indexed ChromaDB chunks, formatted into source-numbered context, sent to a local Ollama model, parsed as structured JSON, and mapped back to trusted retrieval records for citations.
+Phase 5 adds a rigorous but lightweight RAG evaluation framework. The project can now run a repeatable benchmark that measures retrieval quality, grounded answer correctness, citation correctness, insufficient-information behavior, parse success, model reliability, and latency.
 
-Semantic retrieval decides which passages are relevant. The LLM only receives those passages and must answer from them. Citations are mapped back to retrieval results, not generated freely by the model.
-
-## Why RAG
-
-Large language models are powerful, but they do not automatically know private or changing business documents. Retrieval-Augmented Generation connects a model to relevant source passages at answer time, which improves grounding, allows citations, and makes document intelligence systems easier to inspect and evaluate.
+Good RAG requires testing retrieval separately from generation. If retrieval is wrong, a stronger LLM may still answer poorly because it never receives the right evidence. If retrieval is correct but the answer fails, the issue is more likely prompt behavior, structured parsing, or model reliability.
 
 ## Architecture
+
+```mermaid
+flowchart TD
+    A[Evaluation Dataset] --> B[Temporary Documents]
+    B --> C[IndexService]
+    C --> D[Temporary ChromaDB]
+    A --> E[Evaluation Cases]
+    E --> F[Retriever]
+    F --> G[Retrieval Metrics]
+    F --> H[RAGService]
+    H --> I[GroundedAnswer]
+    I --> J[Answer Metrics]
+    I --> K[Citation Metrics]
+    G --> L[Benchmark Report]
+    J --> L
+    K --> L
+```
+
+The normal RAG path remains:
 
 ```mermaid
 flowchart TD
@@ -29,81 +44,171 @@ flowchart TD
     I --> J[Grounded Answer]
 ```
 
-## Current Phase 4 Capabilities
+## Current Phase 5 Capabilities
 
 - Local document ingestion for PDF, DOCX, and TXT files.
-- Text normalization with paragraph boundaries preserved.
-- Recursive character-oriented chunking with configurable size and overlap.
-- Batch embedding generation using sentence-transformers.
-- Persistent ChromaDB vector storage under `./data/chroma` by default.
-- Idempotent indexing with deterministic document and chunk IDs.
-- Semantic vector search over indexed chunks.
-- Grounded question answering with local Ollama models.
-- Structured JSON model responses validated with Pydantic.
-- Source-number citation mapping from retrieval results.
-- Explicit insufficient-information behavior.
-- CLI workflows for indexing, search, asking, stats, delete, clear, JSON output, and retrieval debug.
+- Recursive chunking, batch embeddings, persistent ChromaDB storage, and semantic search.
+- Grounded question answering with source-number citation mapping.
+- Synthetic benchmark dataset under `benchmarks/rag_eval.json`.
+- Retrieval-only benchmark mode that avoids Ollama.
+- Full RAG benchmark mode for `llama3.2`, `gemma3`, or another configured Ollama model.
+- Deterministic metrics for retrieval, answer text, citations, unknown-answer behavior, parse success, and latency.
+- Text and JSON benchmark output.
+- Optional JSON result saving under ignored paths such as `runtime/evaluations/result.json`.
+- Failed-case analysis for practical RAG iteration.
 
-## Grounded Generation Flow
+## Benchmark Dataset
 
-```text
-question
--> Retriever
--> top-k RetrievalResult values
--> ContextBuilder source blocks
--> grounded prompt
--> LLMProvider
--> JSON parser
--> Citation mapping
--> GroundedAnswer
-```
+`benchmarks/rag_eval.json` is a safe synthetic employee-policy benchmark. It includes three tiny documents:
 
-The context builder formats each retrieved chunk as a stable source block:
+- `employee_handbook.txt`
+- `expense_policy.txt`
+- `security_policy.txt`
 
-```text
-[SOURCE 1]
-Filename: employee_handbook.txt
-Chunk: 0
-Distance: 0.21
-Content:
-Employees receive 15 days of paid time off each calendar year.
-```
+It has 10 evaluation cases:
 
-The model is asked to return only:
+- 6 answerable single-source questions
+- 2 answerable multi-source questions
+- 2 unanswerable questions
 
-```json
-{
-  "answer": "string",
-  "answered": true,
-  "source_numbers": [1]
-}
-```
+The benchmark is intentionally small so it can run locally and be repeated after future changes.
 
-The application maps `source_numbers` back to trusted `RetrievalResult` objects. The model is never trusted to invent filenames, document IDs, chunk IDs, page numbers, or citation metadata.
+## Retrieval Metrics
 
-## Insufficient Information
+Retrieval relevance is evaluated against expected source documents, not perfect semantic relevance.
 
-When retrieval returns no results, DocIntel does not call the LLM. It returns:
+- `Hit@K`: at least one expected document appears in retrieved results.
+- `Recall@K`: the fraction of expected documents retrieved.
+- `MRR`: reciprocal rank of the first expected document.
+- Expected document coverage: source coverage for multi-document cases.
+- Retrieved filenames, distances, and ranks are recorded per case.
+
+ChromaDB distances are reported as distances, not similarity scores.
+
+## Answer Metrics
+
+Answer checks are deterministic and intentionally transparent:
+
+- Expected phrase coverage uses case-insensitive normalized substring matching.
+- Answerable cases should return `answered=true`.
+- Expected answer phrases must appear in the answer.
+- Citations should be present for answerable cases.
+- Expected citation documents should be covered.
+
+This is not a human semantic judge. It catches regressions and obvious failures, but it does not replace manual review.
+
+## Citation Metrics
+
+Citations are mapped from trusted retrieval records, not model-generated metadata.
+
+- Citation precision: fraction of cited documents that are expected.
+- Citation recall: fraction of expected source documents that were cited.
+- Citation correctness: answerable cases require expected citation coverage.
+
+For multi-source cases, expected source coverage matters.
+
+## Unknown-Answer Evaluation
+
+Unanswerable cases should return:
 
 ```text
 The indexed documents do not contain enough information to answer this question.
 ```
 
-The prompt also instructs the model to use that exact answer when retrieved context does not contain enough evidence. In that case `answered=false` and citations are empty.
+They should also return `answered=false` and no citations.
 
-## Context Limits
+## Pass/Fail Policy
 
-`MAX_RAG_CONTEXT_CHARS` defaults to `12000`. If retrieved context exceeds the limit, DocIntel keeps highest-ranked chunks first and includes complete chunks where possible. If a single chunk exceeds the limit, it is truncated deterministically.
+Answerable case pass:
 
-No token-counting dependency is used yet.
+- Retrieval hit is true.
+- Answer contains all expected phrases.
+- Citation recall is 100%.
+- Parse succeeded.
 
-## Retrieval And Distance
+Unanswerable case pass:
 
-Vector search compares embeddings, not exact keywords. ChromaDB returns numeric distances, where lower is closer. DocIntel labels these values as `distance` and does not treat them as similarity scores.
+- `answered=false`.
+- The insufficient-information phrase is returned.
+- Citations are empty.
+- Parse succeeded.
 
-No arbitrary retrieval-distance cutoff is applied in Phase 4. The system relies on top-k retrieval plus the model's grounded evidence decision.
+Retrieval-only case pass:
+
+- Answerable cases require retrieval hit.
+- Unanswerable cases are treated as retrieval-only pass because generation is intentionally skipped.
 
 ## CLI Workflows
+
+Run the full benchmark with llama3.2:
+
+```bash
+uv run python -m app.main --evaluate benchmarks/rag_eval.json --model llama3.2
+```
+
+Run the full benchmark with gemma3:
+
+```bash
+uv run python -m app.main --evaluate benchmarks/rag_eval.json --model gemma3
+```
+
+Run retrieval-only evaluation without Ollama:
+
+```bash
+uv run python -m app.main --evaluate benchmarks/rag_eval.json --evaluate-retrieval
+```
+
+Return JSON:
+
+```bash
+uv run python -m app.main --evaluate benchmarks/rag_eval.json --model llama3.2 --output json
+```
+
+Save JSON output:
+
+```bash
+uv run python -m app.main --evaluate benchmarks/rag_eval.json --model llama3.2 --save runtime/evaluations/result.json
+```
+
+The runner creates an isolated temporary ChromaDB path for each evaluation run and cleans it up afterward.
+
+## Model Comparison
+
+Run the same dataset against multiple models and compare:
+
+```text
+Model   Answer Accuracy   Citation Recall   Unknown Accuracy   Avg Latency
+```
+
+DocIntel does not declare a universal winner automatically. A model may be more accurate but slower, or faster but less reliable.
+
+## Failure Analysis
+
+Text output lists failed cases with:
+
+- Case ID
+- Question
+- Expected documents
+- Retrieved documents
+- Answer
+- Cited documents
+- Error, if any
+
+This helps distinguish retrieval failures from generation, prompting, parsing, or citation issues.
+
+## Client Value
+
+Evaluation makes DocIntel more credible than a simple document chatbot. A client can test:
+
+- Whether their policies are retrievable.
+- Whether answers are grounded.
+- Whether citations point to expected sources.
+- Which questions the system cannot answer reliably.
+- How latency changes across models.
+
+No perfect accuracy, legal, HR, compliance, or audit guarantee is implied.
+
+## Core RAG CLI
 
 Index a document:
 
@@ -117,35 +222,10 @@ Ask a grounded question:
 uv run python -m app.main --ask "How many PTO days do employees receive?"
 ```
 
-Use a specific local model:
-
-```bash
-uv run python -m app.main --ask "How many PTO days do employees receive?" --model llama3.2
-uv run python -m app.main --ask "How many PTO days do employees receive?" --model gemma3
-```
-
-Control retrieval count:
-
-```bash
-uv run python -m app.main --ask "What expenses require manager approval?" --top-k 3
-```
-
-Filter to one or more documents:
-
-```bash
-uv run python -m app.main --ask "What is the PTO policy?" --document-id sha256:<id>
-```
-
 Show retrieval evidence:
 
 ```bash
 uv run python -m app.main --ask "How many PTO days do employees receive?" --show-retrieval
-```
-
-Return JSON:
-
-```bash
-uv run python -m app.main --ask "What expenses require manager approval?" --output json
 ```
 
 Inspect retrieval without generation:
@@ -153,20 +233,6 @@ Inspect retrieval without generation:
 ```bash
 uv run python -m app.main --search "expense approval" --top-k 3
 ```
-
-Index stats:
-
-```bash
-uv run python -m app.main --index-stats
-```
-
-Clear the local index:
-
-```bash
-uv run python -m app.main --clear-index --yes
-```
-
-`--clear-index` requires `--yes`.
 
 ## Configuration
 
@@ -186,37 +252,9 @@ MAX_RAG_CONTEXT_CHARS=12000
 
 `CHUNK_OVERLAP` must be smaller than `CHUNK_SIZE`.
 
-## Client Value
-
-Phase 4 is useful for prototypes and client demos around:
-
-- Employee policy assistants
-- Compliance documentation
-- Product manuals
-- Support knowledge bases
-- Internal technical documentation
-
-DocIntel provides grounded answers with citations, but it does not claim legal, HR, compliance, or audit guarantees.
-
-## Demo Collection Direction
-
-The future Employee Handbook Demo can include:
-
-- PTO policy
-- Remote work policy
-- Expense policy
-- Security policy
-
-Example questions:
-
-- How many PTO days do employees receive?
-- What expenses require manager approval?
-- How many remote days are allowed?
-- What does the handbook say about something not present?
-
 ## Security And Privacy
 
-DocIntel is local-first. Private documents can be parsed, embedded, indexed, and queried locally without being sent to a cloud document API.
+DocIntel is local-first. Private documents can be parsed, embedded, indexed, queried, and evaluated locally without being sent to a cloud document API.
 
 The repository ignores:
 
@@ -227,17 +265,18 @@ The repository ignores:
 - `runtime/`
 - `*.log`
 
-Do not commit private client documents, Chroma databases, embeddings, model downloads, logs, or generated runtime data. Avoid logging full private documents.
+Do not commit private client documents, Chroma databases, embeddings, model downloads, logs, generated benchmark outputs, or runtime data.
 
 ## Current Limitations
 
 - No FastAPI backend yet.
 - No Gradio client demo yet.
+- No external LLM judge by default.
 - No reranker.
 - No agents.
 - No OCR for scanned PDFs.
-- No retrieval evaluation suite yet.
 - Chunking is character-oriented, not tokenizer-based.
+- Deterministic answer grading uses substring checks and can penalize semantically correct but differently phrased answers.
 
 ## Technology Stack
 
@@ -255,7 +294,7 @@ Do not commit private client documents, Chroma databases, embeddings, model down
 - pytest
 - Ruff
 
-LangChain, FAISS, Pinecone, Qdrant, FastAPI, Gradio, OCR frameworks, and cloud document APIs are intentionally not included in Phase 4.
+LangChain, FAISS, Pinecone, Qdrant, FastAPI, Gradio, OCR frameworks, and cloud document APIs are intentionally not included in Phase 5.
 
 ## Planned Roadmap
 
@@ -263,7 +302,7 @@ LangChain, FAISS, Pinecone, Qdrant, FastAPI, Gradio, OCR frameworks, and cloud d
 2. Document ingestion ✅
 3. Chunking, embeddings & ChromaDB ✅
 4. Retrieval & grounded Q&A ✅
-5. RAG evaluation
+5. RAG evaluation ✅
 6. FastAPI backend
 7. Gradio client demo
 8. Observability, deployment & portfolio release

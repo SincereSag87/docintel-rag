@@ -45,6 +45,28 @@ def test_cli_parses_ask_model_top_k_json_and_debug() -> None:
     assert args.document_id == ["doc-1"]
 
 
+def test_cli_parses_evaluate_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "--evaluate",
+            "benchmarks/rag_eval.json",
+            "--model",
+            "gemma3",
+            "--output",
+            "json",
+            "--evaluate-retrieval",
+            "--save",
+            "runtime/evaluations/result.json",
+        ]
+    )
+
+    assert args.evaluate == "benchmarks/rag_eval.json"
+    assert args.model == "gemma3"
+    assert args.output == "json"
+    assert args.evaluate_retrieval is True
+    assert args.save == "runtime/evaluations/result.json"
+
+
 def test_cli_requires_confirmation_for_clear_index(capsys) -> None:
     exit_code = run_clear_index(confirmed=False)
 

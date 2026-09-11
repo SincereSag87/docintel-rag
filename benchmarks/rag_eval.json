@@ -1,0 +1,99 @@
+{
+  "name": "employee-policy-demo",
+  "documents": [
+    {
+      "filename": "employee_handbook.txt",
+      "content": "Employee Handbook\n\nPaid Time Off\nEmployees receive 15 days of paid time off each calendar year.\n\nRemote Work\nEmployees may work remotely up to three days each week.\n\nOffice Hours\nCore office hours are 10:00 AM to 3:00 PM local time.\n\nProbation Period\nNew employees have a 90-day probation period."
+    },
+    {
+      "filename": "expense_policy.txt",
+      "content": "Expense Policy\n\nExpense Approval\nExpenses above $500 require manager approval.\n\nAirfare\nAirfare should be booked in economy class unless a director approves otherwise.\n\nReceipts\nReceipts are required for expenses above $25."
+    },
+    {
+      "filename": "security_policy.txt",
+      "content": "Security Policy\n\nPasswords\nPasswords must be at least 14 characters long.\n\nMulti-Factor Authentication\nMFA is required for all internal systems.\n\nCredential Sharing\nEmployees must not share credentials with anyone."
+    }
+  ],
+  "cases": [
+    {
+      "id": "pto-days",
+      "question": "How many PTO days do employees receive?",
+      "answerable": true,
+      "expected_answer_contains": ["15 days"],
+      "expected_documents": ["employee_handbook.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "remote-days",
+      "question": "How many days each week may employees work remotely?",
+      "answerable": true,
+      "expected_answer_contains": ["three days"],
+      "expected_documents": ["employee_handbook.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "office-hours",
+      "question": "What are the core office hours?",
+      "answerable": true,
+      "expected_answer_contains": ["10:00 AM", "3:00 PM"],
+      "expected_documents": ["employee_handbook.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "expense-approval",
+      "question": "When is manager approval required for expenses?",
+      "answerable": true,
+      "expected_answer_contains": ["above $500"],
+      "expected_documents": ["expense_policy.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "airfare-class",
+      "question": "What airfare class should be booked?",
+      "answerable": true,
+      "expected_answer_contains": ["economy class"],
+      "expected_documents": ["expense_policy.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "password-length",
+      "question": "How long must passwords be?",
+      "answerable": true,
+      "expected_answer_contains": ["14 characters"],
+      "expected_documents": ["security_policy.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "pto-and-expense-threshold",
+      "question": "What are the PTO allowance and the manager approval threshold for expenses?",
+      "answerable": true,
+      "expected_answer_contains": ["15 days", "above $500"],
+      "expected_documents": ["employee_handbook.txt", "expense_policy.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "remote-and-mfa",
+      "question": "How many remote work days are allowed and what systems require MFA?",
+      "answerable": true,
+      "expected_answer_contains": ["three days", "all internal systems"],
+      "expected_documents": ["employee_handbook.txt", "security_policy.txt"],
+      "top_k": 3
+    },
+    {
+      "id": "unknown-insurer",
+      "question": "What health insurance provider does the company use?",
+      "answerable": false,
+      "expected_answer_contains": [],
+      "expected_documents": [],
+      "top_k": 3
+    },
+    {
+      "id": "unknown-holiday",
+      "question": "How many floating holidays do employees receive?",
+      "answerable": false,
+      "expected_answer_contains": [],
+      "expected_documents": [],
+      "top_k": 3
+    }
+  ]
+}

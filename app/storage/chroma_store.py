@@ -70,6 +70,15 @@ class ChromaVectorStore(VectorStore):
             path=str(self.path),
         )
 
+    def close(self) -> None:
+        """Release Chroma resources so temporary stores can be removed on Windows."""
+        release_system = getattr(self.client, "_release_system", None)
+        if callable(release_system):
+            release_system(str(self.path))
+        clear_cache = getattr(self.client, "clear_system_cache", None)
+        if callable(clear_cache):
+            clear_cache()
+
     @staticmethod
     def _metadata_for_chroma(metadata: dict[str, object]) -> dict[str, str | int | float | bool]:
         chroma_metadata: dict[str, str | int | float | bool] = {}
